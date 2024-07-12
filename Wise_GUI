@@ -1,0 +1,276 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+from PIL import Image, ImageTk
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import pyttsx3
+import cv2
+import threading
+
+def cal_range(no_of_units):
+    ranges = []
+    n = no_of_units // 25
+    for k in range(25):
+        initial = 1 + k * n
+        final = min((k + 1) * n, no_of_units)
+        ranges.append((initial, final))
+    return ranges
+
+def calculate_total_cost(F, V, Q):
+    total_cost = F + V * Q
+    return total_cost
+
+def calculate_profit_or_loss(total_revenue, total_cost):
+    profit_or_loss = total_revenue - total_cost
+    return profit_or_loss
+
+def calculate_profit_or_loss_per_unit(unit_price, unit_cost):
+    profit_or_loss_per_unit = unit_price - unit_cost
+    return profit_or_loss_per_unit
+
+def calculate_breakeven_quantity(F, P, V):
+    if P > V:
+        breakeven_quantity = F / (P - V)
+        return breakeven_quantity
+    else:
+        return None  # Return None if breakeven quantity is not defined
+def speak(text):
+    engine = pyttsx3.init()
+    engine.say(text)
+    engine.runAndWait()
+
+def fixed_map(option):
+    # Fix for setting text colour for Tkinter 8.6.9
+    # From: https://core.tcl.tk/tk/info/509cafafae
+    return [elm for elm in style.map("Treeview", query_opt=option) if
+        elm[:2] != ("!disabled", "!selected")]
+
+def calculate():
+    try:
+        product_name = entry_product_name.get()
+        F = float(entry_fixed_costs.get())
+        V = float(entry_variable_cost.get())
+        P = float(entry_sales_price.get())
+        N = int(entry_units.get())
+
+        if F < 0 or V < 0 or P < 0 or N < 0:
+            raise ValueError("Inputs cannot be negative.")
+        
+        ranges = cal_range(N)
+        total_costs = []
+        total_revenues = []
+        profits_or_losses = []
+        profits_or_losses_per_unit = []
+
+        for initial, final in ranges:
+            Q = (initial + final) // 2  # Use the midpoint of the range for calculations
+            total_revenue = P * Q
+            total_cost = calculate_total_cost(F, V, Q)
+            profit_or_loss = calculate_profit_or_loss(total_revenue, total_cost)
+            profit_or_loss_per_unit = calculate_profit_or_loss_per_unit(P, V)
+            
+            total_costs.append(total_cost)
+            total_revenues.append(total_revenue)
+            profits_or_losses.append(profit_or_loss)
+            profits_or_losses_per_unit.append(profit_or_loss_per_unit)
+
+        break_even_quantity = calculate_breakeven_quantity(F, P, V)
+
+        data = {
+            'Range': [f"{initial}-{final}" for initial, final in ranges],
+            'Total Cost': total_costs,
+            'Total Revenue': total_revenues,
+            'Profit or Loss': profits_or_losses,
+            'Profit or Loss per Unit': profits_or_losses_per_unit,
+            'Breakeven Quantity': [break_even_quantity] * 25
+        }
+        df = pd.DataFrame(data)
+
+        # Open a new window for output
+        output_window = tk.Toplevel(app)
+        output_window.title("Results")
+        output_window.attributes('-fullscreen', True)
+
+        # Create a style for the Treeview
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.map("Treeview",
+            foreground=fixed_map("foreground"),
+            background=fixed_map("background"))
+
+        # Configure the Treeview style for the selected row
+        style.configure("Treeview", font=("Helvetica", 12), rowheight=25)
+        style.configure("Treeview.Heading", font=("Helvetica", 12, 'bold'))
+        style.map("Treeview", background=[('selected', '#4CAF50')], foreground=[('selected', 'white')])
+
+        # Display results in a treeview
+        tree = ttk.Treeview(output_window, columns=list(df.columns), show='headings')
+        for col in df.columns:
+            tree.heading(col, text=col)
+        tree.pack(pady=10, fill=tk.BOTH, expand=1)
+
+        for index, row in df.iterrows():
+            values = list(row.values)
+            tree.insert("", "end", values=values)
+
+            # Highlight the row closest to breakeven quantity
+            if break_even_quantity is not None:
+                closest_index = min(range(len(ranges)), key=lambda i: abs((ranges[i][0] + ranges[i][1]) // 2 - break_even_quantity))
+                if index == closest_index:
+                    tree.item(tree.get_children()[index], tags=('breakeven',))
+
+        # Configure the tag for the breakeven row
+        tree.tag_configure('breakeven', background='#FFD700', font=("Helvetica", 12, 'bold'))
+
+        # Plot the graph
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(df['Range'], df['Total Revenue'], label='Total Revenue', marker='o')
+        ax.plot(df['Range'], df['Total Cost'], label='Total Cost', marker='o')
+        ax.plot(df['Range'], df['Profit or Loss'], label='Profit or Loss', marker='o')
+        ax.set_title(f'Profitability Analysis - {product_name}', fontsize=14, fontweight='bold')
+        ax.set_xlabel('Range of Units', fontsize=12)
+        ax.set_ylabel('Amount ($)', fontsize=12)
+        ax.grid(True)
+        ax.legend(fontsize=10)
+
+        canvas = FigureCanvasTkAgg(fig, master=output_window)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        
+        lbl_profitable = tk.Label(output_window, text=f"Profitable: {'Yes' if any(p > 0 for p in profits_or_losses) else 'No'}", font=("Helvetica", 14, 'bold'))
+        lbl_profitable.pack()
+
+        lbl_breakeven = tk.Label(output_window, text=f"Breakeven Quantity: {break_even_quantity if break_even_quantity is not None else 'Not applicable'}", font=("Helvetica", 14, 'bold'))
+        lbl_breakeven.pack()
+        
+        speak("Here is your output.")
+
+        # Exit Full Screen and New Analysis buttons
+        btn_exit_fullscreen = ttk.Button(output_window, text="Exit Full Screen", command=lambda: output_window.attributes('-fullscreen', False))
+        btn_exit_fullscreen.pack(pady=10)
+
+        btn_new = ttk.Button(output_window, text="New Analysis", command=lambda: [output_window.destroy(), input_window.lift()])
+        btn_new.pack()
+
+    except ValueError as e:
+        messagebox.showerror("Input Error", str(e))
+
+def play_video(canvas, video_path):
+    cap = cv2.VideoCapture(video_path)
+    
+    def update_frame():
+        ret, frame = cap.read()
+        if ret:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = cv2.resize(frame, (screen_width, screen_height))
+            photo = ImageTk.PhotoImage(image=Image.fromarray(frame))
+            canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+            canvas.photo = photo
+            canvas.after(33, update_frame)  # ~30 fps
+        else:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Restart video from beginning
+            update_frame()
+
+    update_frame()
+
+def open_input_window():
+    global input_window, entry_product_name, entry_fixed_costs, entry_variable_cost, entry_sales_price, entry_units
+    
+    # Create a new window for user inputs
+    input_window = tk.Toplevel(app)
+    input_window.title("Input Data")
+    input_window.attributes('-fullscreen', True)
+
+    # Create a canvas for the video background
+    canvas = tk.Canvas(input_window, width=screen_width, height=screen_height)
+    canvas.pack(fill=tk.BOTH, expand=True)
+
+    # Start playing the video in a separate thread
+    video_thread = threading.Thread(target=play_video, args=(canvas, "Data Analytics Background 1.mp4"))  # Replace with your video path
+    video_thread.daemon = True
+    video_thread.start()
+
+    # Set the main theme color and fonts
+    style = ttk.Style()
+    style.theme_use('clam')
+    style.configure("TLabel", font=("Helvetica", 14), foreground="white")
+    style.configure("TEntry", font=("Helvetica", 14), fieldbackground="white", foreground="black", insertcolor="black")  # White background, black text
+    style.configure("TButton", font=("Helvetica", 14, 'bold'), background="#4CAF50", foreground="white", padding=(20, 10))
+    style.map("TButton", background=[('active', '#45a049')])
+
+    # Set the input frame to be transparent
+    frame_input = tk.Frame(input_window, bg="navy", padx=40, pady=40, bd=10, relief=tk.RIDGE)
+    frame_input.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+    tk.Label(frame_input, text="Product Name:", bg="light blue").grid(row=0, column=0, padx=10, pady=10, sticky="e")
+    entry_product_name = ttk.Entry(frame_input, width=40)
+    entry_product_name.grid(row=0, column=1, padx=10, pady=10)
+
+    tk.Label(frame_input, text="Fixed Operating Costs:", bg="light blue").grid(row=1, column=0, padx=10, pady=10, sticky="e")
+    entry_fixed_costs = ttk.Entry(frame_input, width=40)
+    entry_fixed_costs.grid(row=1, column=1, padx=10, pady=10)
+
+    tk.Label(frame_input, text="Variable Cost per Unit:", bg="light blue").grid(row=2, column=0, padx=10, pady=10, sticky="e")
+    entry_variable_cost = ttk.Entry(frame_input, width=40)
+    entry_variable_cost.grid(row=2, column=1, padx=10, pady=10)
+
+    tk.Label(frame_input, text="Sales Price per Unit:", bg="light blue").grid(row=3, column=0, padx=10, pady=10, sticky="e")
+    entry_sales_price = ttk.Entry(frame_input, width=40)
+    entry_sales_price.grid(row=3, column=1, padx=10, pady=10)
+
+    tk.Label(frame_input, text="Number of Units:", bg="light blue").grid(row=4, column=0, padx=10, pady=10, sticky="e")
+    entry_units = ttk.Entry(frame_input, width=40)
+    entry_units.grid(row=4, column=1, padx=10, pady=10)
+
+    btn_calculate = ttk.Button(frame_input, text="Calculate", command=calculate)
+    btn_calculate.grid(row=5, columnspan=2, pady=20)
+
+    speak("Please provide the required information.")
+
+    # Exit Full Screen button
+    btn_exit_fullscreen = ttk.Button(input_window, text="Exit Full Screen", command=lambda: input_window.attributes('-fullscreen', False))
+    btn_exit_fullscreen.place(relx=0.9, rely=0.1, anchor=tk.CENTER)
+
+app = tk.Tk()
+app.title("Profitability Calculator")
+
+# Make the window full screen
+app.attributes('-fullscreen', True)
+
+# Create a canvas to add the background image
+canvas = tk.Canvas(app)
+canvas.pack(fill="both", expand=True)
+
+# Load the background image
+background_image = Image.open("background.jpeg")  # Replace with your background image path
+
+# Get the screen size
+screen_width = app.winfo_screenwidth()
+screen_height = app.winfo_screenheight()
+
+# Resize the background image to fit the screen
+background_image = background_image.resize((screen_width, screen_height), Image.ANTIALIAS)
+background_photo = ImageTk.PhotoImage(background_image)
+
+# Place the background image on the canvas
+canvas.create_image(0, 0, image=background_photo, anchor="nw")
+
+# Create a style for the start button
+style = ttk.Style()
+style.theme_use('clam')
+style.configure("StartButton.TButton", font=("Helvetica", 24, 'bold'), padding=20, background="#4CAF50", foreground="white")
+style.map("StartButton.TButton", background=[('active', '#45a049')])
+
+# Add the start button on the canvas
+button = ttk.Button(app, text="Start", command=open_input_window, style="StartButton.TButton")
+button_window = canvas.create_window(screen_width // 2, screen_height // 2, window=button)
+
+# Function to exit full-screen mode
+def exit_fullscreen(event):
+    app.attributes('-fullscreen', False)
+
+# Bind the Escape key to exit full-screen mode
+app.bind('<Escape>', exit_fullscreen)
+
+app.mainloop()
