@@ -7,7 +7,7 @@
 - Cricket Score Sheet (Jupyter Notebook)
 - Newtons_law
 - Profitability_GUI
-- Profitability_baisc.ipynb
+- Profitability_baisc
 
 ---
 
