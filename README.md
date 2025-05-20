@@ -5,7 +5,9 @@
 ## Contents
 
 - Cricket Score Sheet (Jupyter Notebook)
-- [Future Projects Placeholder]
+- Newtons_law
+- Profitability_GUI
+- Profitability_baisc.ipynb
 
 ---
 
